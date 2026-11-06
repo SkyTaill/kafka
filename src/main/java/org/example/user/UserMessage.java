@@ -1,19 +1,19 @@
 package org.example.user;
 
-public class User {
+public class UserMessage {
     private int id;
     private String name;
     private String LastName;
-    private Long phoneNumber;
+    private String message;
     // Конструктор
-    public User(int id, String name, String lastName, Long phoneNumber) {
+    public UserMessage(int id, String name, String lastName, String message) {
         this.id = id;
         this.name = name;
         LastName = lastName;
-        this.phoneNumber = phoneNumber;
+        this.message = message;
     }
 
-    public User() {
+    public UserMessage() {
     }
 
     public void setId(int id) {
@@ -28,9 +28,7 @@ public class User {
         LastName = lastName;
     }
 
-    public void setPhoneNumber(Long phoneNumber) {
-        this.phoneNumber = phoneNumber;
-    }
+
 
     // Геттеры и сеттеры
     public int getId() {
@@ -41,12 +39,17 @@ public class User {
         return name;
     }
 
+    public String getMessage() {
+        return message;
+    }
+
+    public void setMessage(String message) {
+        this.message = message;
+    }
 
     public String getLastName() {
         return LastName;
     }
 
-    public Long getPhoneNumber() {
-        return phoneNumber;
-    }
+
 }

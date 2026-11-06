@@ -3,7 +3,6 @@ package org.example;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.TopicPartition;
-import org.example.user.User;
 
 import java.time.Duration;
 import java.util.*;

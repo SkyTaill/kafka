@@ -17,18 +17,21 @@
     </properties>
 
     <dependencies>
-        <!-- Основная зависимость: KafkaProducer, ProducerConfig, ProducerRecord, TopicConfig -->
         <dependency>
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
-            <version>${kafka.version}</version>
+            <version>${kafka.version}</version>      <!-- 3.9.0 -->
+        </dependency>
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-streams</artifactId>
+            <version>${kafka.version}</version>      <!-- тоже 3.9.0, было 3.6.0 -->
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>2.17.0</version>
         </dependency>
-        <!-- Логирование (kafka-clients пишет через SLF4J; без биндинга будет warning) -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>

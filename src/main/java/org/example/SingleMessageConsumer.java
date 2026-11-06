@@ -3,7 +3,7 @@ package org.example;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.deser.std.StringDeserializer;
 import org.apache.kafka.clients.consumer.*;
-import org.example.user.User;
+//import org.example.user.User;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -40,10 +40,10 @@ public class SingleMessageConsumer implements Runnable {
                 for (ConsumerRecord<String, String> record : records) {
                     try {
                         // десериализуем JSON-строку обратно в объект
-                        User order = MAPPER.readValue(record.value(), User.class);
-
-                        System.out.printf("Gets: key=%s, заказ=%s, partition=%d, offset=%d%n",
-                                record.key(), order, record.partition(), record.offset());
+//                        User order = MAPPER.readValue(record.value(), User.class);
+//
+//                        System.out.printf("Gets: key=%s, заказ=%s, partition=%d, offset=%d%n",
+//                                record.key(), order, record.partition(), record.offset());
 
                     } catch (Exception e) {
                         System.err.printf("Битый JSON в offset=%d: %s%n",
