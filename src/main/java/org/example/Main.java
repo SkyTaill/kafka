@@ -11,10 +11,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
-import org.apache.kafka.streams.kstream.Consumed;
-import org.apache.kafka.streams.kstream.GlobalKTable;
-import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.kstream.KTable;       // ← ДОБАВЛЕН импорт
+import org.apache.kafka.streams.kstream.*;
 import org.example.blockUser.BlockUser;
 import org.example.blockUser.BlockUserSerdes;
 import org.example.user.UserMessage;
@@ -30,8 +27,7 @@ public class Main {
     private static final String MESSAGE_TOPIC = "messages";
     private static final String BLOCKED_STORE = "blocked_users";
     private static final String FILTER_MESSAGE_TOPIC = "filtered_messages";
-    public static KStream<String, String> joinedStream;   // видно из main
-    public static StreamsBuilder builder = new StreamsBuilder();  // ← ДОБАВЛЕНО: один builder на приложение
+    public static StreamsBuilder builder = new StreamsBuilder();  // один builder на приложение
 
 
     public static void main(String[] args) {
@@ -45,12 +41,10 @@ public class Main {
         try {
             createTopics();
 
-            //produceTestMessages();
-            //    produceBlockeUser();      // ← РАСКОММЕНТИРОВАНО: кладём список заблокированных в топик
+            produceBlockeUser();      // ← РАСКОММЕНТИРОВАНО: кладём заблокированных (ключ = id заблокированного)
 
-            addGlobalKTable();        // строит топологию: таблица + поток + join + печать таблицы
+            addGlobalKTable();        // строит топологию: таблица заблокированных + поток сообщений + фильтр
 
-            // ← ДОБАВЛЕНО: запуск (без него таблица никогда не наполнится)
             Properties props = new Properties();
             props.put(StreamsConfig.APPLICATION_ID_CONFIG, "blocked-users-app");
             props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
@@ -88,7 +82,6 @@ public class Main {
             Set<String> existingTopics = adminClient.listTopics().names().get();
 
             if (!existingTopics.contains(MESSAGE_TOPIC)) {
-                // Создаем топик для данных о продажах
                 NewTopic salesTopic = new NewTopic(MESSAGE_TOPIC, 1, (short) 1);
 
                 adminClient.createTopics(Collections.singletonList(salesTopic)).all().get();
@@ -97,26 +90,25 @@ public class Main {
                 System.out.println("Топик " + MESSAGE_TOPIC + " уже существует");
             }
 
-            // ← ДОБАВЛЕНО: топик заблокированных — источник KTable
+            // топик заблокированных — источник KTable
             if (!existingTopics.contains(BLOCKED_STORE)) {
                 adminClient.createTopics(Collections.singletonList(
                         new NewTopic(BLOCKED_STORE, 1, (short) 1))).all().get();
                 System.out.println("Топик " + BLOCKED_STORE + " создан");
             }
 
-            // ← ДОБАВЛЕНО: выходной топик
-            if (!existingTopics.contains("output-topic")) {
+            // ← ИЗМЕНЕНО: вместо output-topic — топик для НЕ заблокированных сообщений
+            if (!existingTopics.contains(FILTER_MESSAGE_TOPIC)) {
                 adminClient.createTopics(Collections.singletonList(
-                        new NewTopic("output-topic", 1, (short) 1))).all().get();
-                System.out.println("Топик output-topic создан");
+                        new NewTopic(FILTER_MESSAGE_TOPIC, 1, (short) 1))).all().get();
+                System.out.println("Топик " + FILTER_MESSAGE_TOPIC + " создан");
             }
         }
     }
 
     private static void produceTestMessages() {
         Properties producerProps = new Properties();
-        producerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9094,localhost:9096");
-        // сериализаторы передаём в конструктор: ключ — строка, значение — ваш Serdes
+        producerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS); // ← ИЗМЕНЕНО
 
         try (KafkaProducer<String, UserMessage> producer = new KafkaProducer<>(
                 producerProps,
@@ -139,53 +131,49 @@ public class Main {
 
     private static void produceBlockeUser() {
         Properties producerProps = new Properties();
-        producerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9094,localhost:9096");
-        // сериализаторы передаём в конструктор: ключ — строка, значение — ваш Serdes
+        producerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS); // ← ИЗМЕНЕНО
 
         try (KafkaProducer<String, BlockUser> producer = new KafkaProducer<>(
                 producerProps,
                 new StringSerializer(),                // ключ
-                new BlockUserSerdes().serializer()   // значение — объект BlockUser
+                new BlockUserSerdes().serializer()     // значение — объект BlockUser
         )) {
-            producer.send(new ProducerRecord<>(BLOCKED_STORE, "key1",
-                    new BlockUser(1, 2)));
-            producer.send(new ProducerRecord<>(BLOCKED_STORE, "key1",
-                    new BlockUser(1, 3)));
+            // ← ИЗМЕНЕНО: КЛЮЧ = id заблокированного (blockIdUser) строкой —
+            // именно по этому ключу поток сообщений join'ится с таблицей
+            producer.send(new ProducerRecord<>(BLOCKED_STORE, "2", new BlockUser(1, 2)));
+            producer.send(new ProducerRecord<>(BLOCKED_STORE, "3", new BlockUser(1, 3)));
 
             producer.flush();
-            System.out.println("Объекты BlockUser отправлены в " + BLOCKED_STORE); // ← поправлен лог
+            System.out.println("Объекты BlockUser отправлены в " + BLOCKED_STORE);
         }
     }
 
     private static void addGlobalKTable() {
-        // ← ЕДИНСТВЕННЫЙ источник для blocked_users — обычная KTable
-        KTable<String, BlockUser> table = builder.table(
+        // ЕДИНСТВЕННЫЙ источник для blocked_users — GlobalKTable
+        GlobalKTable<String, BlockUser> globalTable = builder.globalTable(
                 BLOCKED_STORE,
                 Consumed.with(Serdes.String(), new BlockUserSerdes())
         );
 
-        // ← ваш "список заблокированных": каждое обновление таблицы печатается
-        table.toStream().foreach((key, value) ->
-                System.out.println("KTable: key=" + key
-                        + ", idUser=" + value.getIdUser()
-                        + ", blockIdUser=" + value.getBlockIdUser()));
-
-        // ← поток событий берём ИЗ таблицы (никаких других источников этого топика нет)
-        KStream<String, BlockUser> stream = table.toStream();
-
-        // ← leftJoin с ОБЫЧНОЙ KTable: keyValueMapper НЕ нужен — ключи совпадают напрямую
-        joinedStream = stream.leftJoin(
-                table,
-                (streamValue, tableValue) -> {
-                    String left = streamValue.getIdUser() + "-" + streamValue.getBlockIdUser();
-                    String right = (tableValue != null)
-                            ? tableValue.getIdUser() + "-" + tableValue.getBlockIdUser()
-                            : "нет_в_таблице";
-                    return left + " => " + right;
-                }
+        // ЕДИНСТВЕННЫЙ источник для messages — поток сообщений
+        KStream<String, UserMessage> stream = builder.stream(
+                MESSAGE_TOPIC,
+                Consumed.with(Serdes.String(), new UserMessageSerdes())
         );
 
-        joinedStream.foreach((key, value) ->
-                System.out.println("Joined Key: " + key + ", Value: " + value));
+        // ключ для поиска в глобальной таблице — id отправителя
+        KeyValueMapper<String, UserMessage, String> keyMapper =
+                (key, value) -> String.valueOf(value.getId());
+
+        // blocked == null  → НЕ заблокирован → возвращаем сообщение
+        // blocked != null  → заблокирован → null
+        ValueJoiner<UserMessage, BlockUser, UserMessage> joiner =
+                (message, blocked) -> blocked == null ? message : null;
+
+        KStream<String, UserMessage> notBlockedStream = stream.leftJoin(globalTable, keyMapper, joiner);
+
+        // В FILTER_MESSAGE_TOPIC пишем только не заблокированных
+        notBlockedStream.filter((key, value) -> value != null)
+                .to(FILTER_MESSAGE_TOPIC, Produced.with(Serdes.String(), new UserMessageSerdes()));
     }
 }
