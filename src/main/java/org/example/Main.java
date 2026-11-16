@@ -17,10 +17,9 @@ import org.example.blockUser.BlockUserSerdes;
 import org.example.user.UserMessage;
 import org.example.user.UserMessageSerdes;
 
-import java.util.Collections;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
+import java.util.stream.Collectors;
 
 public class Main {
     private static final String BOOTSTRAP_SERVERS = "127.0.0.1:9094"; // было localhost:9092
@@ -28,22 +27,21 @@ public class Main {
     private static final String BLOCKED_STORE = "blocked_users";
     private static final String FILTER_MESSAGE_TOPIC = "filtered_messages";
     public static StreamsBuilder builder = new StreamsBuilder();  // один builder на приложение
-
+    private static final Set<String> EXTRA_WORDS = new HashSet<>(Arrays.asList("привет", "кафка"));
 
     public static void main(String[] args) {
 
         // Thread producerThread = new Thread(new MessageProducer(), "producer-thread");
 
-        Thread singleConsumerThread = new Thread(new SingleMessageConsumer(), "single-consumer-thread");
-
-        Thread batchConsumerThread = new Thread(new BatchMessageConsumer(), "batch-consumer-thread");
 
         try {
             createTopics();
 
-            produceBlockeUser();      // ← РАСКОММЕНТИРОВАНО: кладём заблокированных (ключ = id заблокированного)
+            produceBlockeUser();
 
-            addGlobalKTable();        // строит топологию: таблица заблокированных + поток сообщений + фильтр
+            produceTestMessages();
+
+            addGlobalKTable();
 
             Properties props = new Properties();
             props.put(StreamsConfig.APPLICATION_ID_CONFIG, "blocked-users-app");
@@ -116,11 +114,11 @@ public class Main {
                 new UserMessageSerdes().serializer()   // значение — объект UserMessage
         )) {
             producer.send(new ProducerRecord<>(MESSAGE_TOPIC, "key1",
-                    new UserMessage(1, "Иван", "Иванов", "100")));
+                    new UserMessage(1, "Иван", "Иванов", "привет всем 3")));
             producer.send(new ProducerRecord<>(MESSAGE_TOPIC, "key2",
-                    new UserMessage(2, "Анна", "Петрова", "200")));
+                    new UserMessage(2, "Анна", "Петрова", "привет всем 2")));
             producer.send(new ProducerRecord<>(MESSAGE_TOPIC, "key3",
-                    new UserMessage(3, "Сергей", "Сидоров", "привет")));
+                    new UserMessage(3, "Сергей", "Сидоров", "привет всем ")));
             producer.send(new ProducerRecord<>(MESSAGE_TOPIC, "key4",
                     new UserMessage(4, "Мария", "Кузнецова", "кафка")));
 
@@ -139,7 +137,7 @@ public class Main {
                 new BlockUserSerdes().serializer()     // значение — объект BlockUser
         )) {
             // ← ИЗМЕНЕНО: КЛЮЧ = id заблокированного (blockIdUser) строкой —
-            // именно по этому ключу поток сообщений join'ится с таблицей
+            // именно по этому ключу поток сообщений join с таблицей
             producer.send(new ProducerRecord<>(BLOCKED_STORE, "2", new BlockUser(1, 2)));
             producer.send(new ProducerRecord<>(BLOCKED_STORE, "3", new BlockUser(1, 3)));
 
@@ -148,32 +146,44 @@ public class Main {
         }
     }
 
+    //реализация KTable и кода с фильтрацией по пользователям и словам
     private static void addGlobalKTable() {
-        // ЕДИНСТВЕННЫЙ источник для blocked_users — GlobalKTable
         GlobalKTable<String, BlockUser> globalTable = builder.globalTable(
                 BLOCKED_STORE,
                 Consumed.with(Serdes.String(), new BlockUserSerdes())
         );
 
-        // ЕДИНСТВЕННЫЙ источник для messages — поток сообщений
         KStream<String, UserMessage> stream = builder.stream(
                 MESSAGE_TOPIC,
                 Consumed.with(Serdes.String(), new UserMessageSerdes())
         );
 
-        // ключ для поиска в глобальной таблице — id отправителя
         KeyValueMapper<String, UserMessage, String> keyMapper =
                 (key, value) -> String.valueOf(value.getId());
 
-        // blocked == null  → НЕ заблокирован → возвращаем сообщение
-        // blocked != null  → заблокирован → null
+
         ValueJoiner<UserMessage, BlockUser, UserMessage> joiner =
                 (message, blocked) -> blocked == null ? message : null;
 
         KStream<String, UserMessage> notBlockedStream = stream.leftJoin(globalTable, keyMapper, joiner);
 
-        // В FILTER_MESSAGE_TOPIC пишем только не заблокированных
-        notBlockedStream.filter((key, value) -> value != null)
+        notBlockedStream
+                .filter((key, value) -> value != null)
+                .mapValues(value -> new UserMessage(
+                        value.getId(),
+                        value.getName(),
+                        value.getLastName(),
+                        cleanText(value.getMessage())))
                 .to(FILTER_MESSAGE_TOPIC, Produced.with(Serdes.String(), new UserMessageSerdes()));
+    }
+
+
+    private static String cleanText(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return text;
+        }
+        return Arrays.stream(text.split("\\s+"))
+                .filter(word -> !EXTRA_WORDS.contains(word.toLowerCase()))
+                .collect(Collectors.joining(" "));
     }
 }
